@@ -1,0 +1,2 @@
+- setup-file:
+    local-name: /home/zz/ROS/devel/.private/moveo_moveit/setup.sh

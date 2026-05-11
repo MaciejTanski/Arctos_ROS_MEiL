@@ -1,0 +1,11 @@
+[01m[K/home/zz/ROS/src/arctos_moveit/src/arctos_pick_place.cpp:[m[K In function ‘[01m[Kvoid place(moveit::planning_interface::MoveGroupInterface&)[m[K’:
+[01m[K/home/zz/ROS/src/arctos_moveit/src/arctos_pick_place.cpp:175:5:[m[K [01;31m[Kerror: [m[K‘[01m[Kgrasps[m[K’ was not declared in this scope
+     [01;31m[Kgrasps[m[K[0].allowed_touch_objects.push_back("table2");
+     [01;31m[K^~~~~~[m[K
+[01m[K/home/zz/ROS/src/arctos_moveit/src/arctos_pick_place.cpp:175:5:[m[K [01;36m[Knote: [m[Ksuggested alternative: ‘[01m[Kgroup[m[K’
+     [01;36m[Kgrasps[m[K[0].allowed_touch_objects.push_back("table2");
+     [01;36m[K^~~~~~[m[K
+     [32m[Kgroup[m[K
+make[2]: *** [CMakeFiles/arctos_pick_place.dir/src/arctos_pick_place.cpp.o] Error 1
+make[1]: *** [CMakeFiles/arctos_pick_place.dir/all] Error 2
+make: *** [all] Error 2

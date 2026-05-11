@@ -1,0 +1,1 @@
+/home/zz/ROS/devel/.private/moveo_moveit/share/gennodejs/ros/moveo_moveit/msg/_index.js

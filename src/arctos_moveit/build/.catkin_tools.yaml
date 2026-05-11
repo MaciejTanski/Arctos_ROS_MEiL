@@ -1,0 +1,6 @@
+devel_space: /home/zz/ROS/arctos_moveit/devel
+install: false
+install_space: /home/zz/ROS/arctos_moveit/install
+profile: default
+source_space: /home/zz/ROS/arctos_moveit/src
+workspace: /home/zz/ROS/arctos_moveit

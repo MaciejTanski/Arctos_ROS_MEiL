@@ -1,0 +1,1 @@
+/home/zz/ROS/devel/.private/moveo_moveit/share/roseus/ros/moveo_moveit/manifest.l

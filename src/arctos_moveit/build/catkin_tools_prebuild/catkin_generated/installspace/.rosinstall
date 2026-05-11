@@ -1,0 +1,2 @@
+- setup-file:
+    local-name: /home/zz/ROS/arctos_moveit/install/setup.sh
