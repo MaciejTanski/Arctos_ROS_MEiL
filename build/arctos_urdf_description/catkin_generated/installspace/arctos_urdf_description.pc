@@ -1,8 +1,0 @@
-prefix=/home/zz/ROS/install
-
-Name: arctos_urdf_description
-Description: Description of arctos_urdf_description
-Version: 0.0.0
-Cflags: 
-Libs: -L${prefix}/lib 
-Requires: 

@@ -1,1 +1,0 @@
-/home/zz/ROS/devel/.private/arctos_config/lib/pkgconfig/arctos_config.pc

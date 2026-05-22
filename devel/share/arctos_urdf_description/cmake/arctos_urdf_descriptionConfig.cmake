@@ -1,1 +1,0 @@
-/home/zz/ROS/devel/.private/arctos_urdf_description/share/arctos_urdf_description/cmake/arctos_urdf_descriptionConfig.cmake

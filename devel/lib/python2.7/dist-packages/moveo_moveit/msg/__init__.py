@@ -1,1 +1,0 @@
-/home/zz/ROS/devel/.private/moveo_moveit/lib/python2.7/dist-packages/moveo_moveit/msg/__init__.py

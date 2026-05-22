@@ -1,6 +1,0 @@
-devel_space: /home/zz/ROS/devel
-install: false
-install_space: /home/zz/ROS/install
-profile: default
-source_space: /home/zz/ROS/src
-workspace: /home/zz/ROS

@@ -1,1 +1,0 @@
-/home/zz/ROS/devel/.private/moveo_moveit/lib/pkgconfig/moveo_moveit.pc

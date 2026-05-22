@@ -1,8 +1,0 @@
-prefix=/home/zz/ROS/devel/.private/arctos_config
-
-Name: arctos_config
-Description: Description of arctos_config
-Version: 0.3.0
-Cflags: 
-Libs: -L${prefix}/lib 
-Requires: 
