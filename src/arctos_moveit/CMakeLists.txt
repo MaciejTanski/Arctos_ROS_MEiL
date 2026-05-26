@@ -21,6 +21,7 @@ find_package(catkin REQUIRED
     pluginlib
     geometric_shapes
     moveit_visual_tools
+    rosbag
 )
 
 find_package(Boost REQUIRED system filesystem date_time thread)
@@ -63,6 +64,9 @@ link_directories(${catkin_LIBRARY_DIRS})
 
 add_executable(arctos_pick_place src/arctos_pick_place.cpp)
 target_link_libraries(arctos_pick_place ${catkin_LIBRARIES})
+
+add_executable(arctos_jog src/arctos_jog.cpp)
+target_link_libraries(arctos_jog ${catkin_LIBRARIES})
 
 ## Declare a C++ executable
 add_executable(moveit_convert src/moveit_convert.cpp)

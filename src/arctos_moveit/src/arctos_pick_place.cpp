@@ -3,6 +3,9 @@
 #include <moveit/move_group_interface/move_group_interface.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 
+#include "arctos_constraints.h"
+#include "arctos_review.h"
+
 const double tau = 2 * M_PI;
 
 // ─────────────────────────────────────────────────────────────
@@ -286,16 +289,24 @@ int main(int argc, char** argv)
     moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
     moveit::planning_interface::MoveGroupInterface arm_group("arm");
 
-    arm_group.setPlanningTime(15.0);
-    arm_group.setNumPlanningAttempts(10);
+    arm_group.setPlanningTime(10.0);
+    arm_group.setNumPlanningAttempts(5);
     arm_group.setMaxVelocityScalingFactor(0.5);
     arm_group.setMaxAccelerationScalingFactor(0.3);
-    arm_group.setPlannerId("RRTConnect");
+    arm_group.setPlannerId("RRTConnect"); //było RRTConnect // BFMT //RRTstar
     arm_group.setEndEffectorLink("Link_6_1");
 
     // KLUCZOWE: setEndEffector raz w main, przed pick i place
     // Nazwa "hand" pochodzi z SRDF: <end_effector name="hand" ...>
     arm_group.setEndEffector("hand");
+
+    ros::Publisher disp_pub = nh.advertise<moveit_msgs::DisplayTrajectory>(
+        "/move_group/display_planned_path", 1, true);
+
+    rosbag::Bag bag;
+    bag.open("/root/catkin_ws/accepted_motions.bag", rosbag::bagmode::Write);
+
+    using ArctosReview::Result;
 
     ROS_INFO("Reference frame : %s", arm_group.getPlanningFrame().c_str());
     ROS_INFO("End effector    : %s", arm_group.getEndEffectorLink().c_str());
@@ -320,12 +331,62 @@ int main(int argc, char** argv)
     addCollisionObjects(planning_scene_interface);
     ros::WallDuration(1.0).sleep();
 
+
+    {
+    const double ux = OBJ_X, uy = OBJ_Y;
+    const double u_len = std::sqrt(ux*ux + uy*uy);
+    const double dist = TOOL_OFFSET + APPROACH_DES;
+
+    geometry_msgs::Pose pre_pick;
+    pre_pick.position.x = OBJ_X - (ux/u_len) * dist;
+    pre_pick.position.y = OBJ_Y - (uy/u_len) * dist;
+    pre_pick.position.z = OBJ_Z + OBJ_H / 2.0;
+
+    tf2::Quaternion q;
+    q.setRPY(0.0, -tau/4.0, tau/4.0 + std::atan2(uy, ux));
+    pre_pick.orientation = tf2::toMsg(q);
+
+    ArctosCfg::applyConstraints(arm_group, ArctosCfg::forApproachPick());
+    arm_group.setPoseTarget(pre_pick);
+    if (ArctosReview::planReviewExecute(arm_group, "do_pre_pick", disp_pub, &bag)
+            == ArctosReview::Result::ABORTED) { bag.close(); return 0; }
+    ArctosCfg::clearConstraints(arm_group);
+    }
+
+
     ROS_INFO(">>> PICK...");
+    // ArctosCfg::applyConstraints(arm_group, ArctosCfg::forApproachPick());
     pick(arm_group);
+    // ArctosCfg::clearConstraints(arm_group);
     ros::WallDuration(1.0).sleep();
 
+    // ── RUCH DO POZYCJI PRE-PLACE (przegląd + replan) ─────────────
+// ── RUCH DO POZYCJI PRE-PLACE (przegląd + replan) ─────────────
+    {
+    // Orientacja, w jakiej obiekt jest TRZYMANY po pick.
+    // place() oczekuje jej jako punktu startowego i sam dokłada
+    // przyrostowy obrót (angle_z2 - angle_z_pick).
+    geometry_msgs::Pose held = arm_group.getCurrentPose().pose;
+
+    geometry_msgs::Pose pre_place;
+    pre_place.position.x = B2X;
+    pre_place.position.y = B2Y;
+    pre_place.position.z = B2Z + TABLE_H2 + OBJ_H / 2.0 + APPROACH_DES;
+    pre_place.orientation = held.orientation;   // <<< NIE reorientuj, tylko translacja
+
+    ArctosCfg::applyConstraints(arm_group, ArctosCfg::forApproachPlace());
+    arm_group.setPoseTarget(pre_place);
+    if (ArctosReview::planReviewExecute(arm_group, "do_pre_place", disp_pub, &bag)
+            == ArctosReview::Result::ABORTED) { bag.close(); return 0; }
+    ArctosCfg::clearConstraints(arm_group);
+    }  
+    
+
+
     ROS_INFO(">>> PLACE...");
+    
     place(arm_group);
+    
     ros::WallDuration(1.0).sleep();
 
     ROS_INFO(">>> Sekwencja zakonczona.");
