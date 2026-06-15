@@ -79,8 +79,8 @@ inline moveit_msgs::Constraints forApproachPick()
         jc("joint1",  0.00, 0.05, 0.05),   // skierowany na obiekt (oś -Y)
         jc("joint2", 0, 0.9, 1.4),   // pochylony do przodu
         jc("joint3",  0, 2.5, 0.1),   // ugięty kompensacyjnie
-        //jc("joint4",  0, 2.0, 0),
-        jc("joint6",  0, 0, 2.0),
+        jc("joint4",  0, 0.2, 0.2),
+        //jc("joint6",  0, 0, 2.0),
     };
     return c;
 }
@@ -92,9 +92,10 @@ inline moveit_msgs::Constraints forApproachPlace()
     moveit_msgs::Constraints c;
     c.name = "approach_place";
     c.joint_constraints = {
-        //jc("joint1",  0.8, 1.2, 1.2),   // skierowany na cel (oś +X)
+        jc("joint1",  0.785,  1.0,  1.0),   // skierowany na cel (oś +X)
         //jc("joint2", 0, 0.80, 0.80),
         //jc("joint3",  0, 0.8, 0.8),
+        jc("joint4",  0, 0.2, 0.2),
     };
     return c;
 }
@@ -105,7 +106,8 @@ inline moveit_msgs::Constraints forReturnHome()
     moveit_msgs::Constraints c;
     c.name = "return_home";
     c.joint_constraints = {
-        jc("joint2", -0.50, 0.80, 0.80),   // tylko nie wygięty "do tyłu"
+        jc("joint2", 0, 0.9, 1.4),   // tylko nie wygięty "do tyłu"
+        jc("joint3",  0, 2.5, 0.1),
     };
     return c;
 }

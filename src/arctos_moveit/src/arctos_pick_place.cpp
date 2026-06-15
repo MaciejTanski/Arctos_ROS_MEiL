@@ -40,7 +40,7 @@ const double OBJ_R = 0.01;          // promien cylindra
 const double APPROACH_MIN = 0.05;
 const double APPROACH_DES = 0.10;
 const double RETREAT_MIN  = 0.05;
-const double RETREAT_DES  = 0.20;
+const double RETREAT_DES  = 0.10;
 const double TOOL_OFFSET = 0.075;
 
 // ─────────────────────────────────────────────────────────────
@@ -73,152 +73,154 @@ void closedGripper(trajectory_msgs::JointTrajectory& posture)
     posture.points[0].time_from_start = ros::Duration(0.5);
 }
 
+// Ruch liniowy Cartesian — deterministyczny, bez przeglądu
+bool cartesianMove(moveit::planning_interface::MoveGroupInterface& group,
+                   const geometry_msgs::Pose& target, const std::string& name)
+{
+    std::vector<geometry_msgs::Pose> wp = {target};
+    moveit_msgs::RobotTrajectory traj;
+    double frac = group.computeCartesianPath(wp, 0.005, 2.0, traj);
+    ROS_INFO("[%s] Cartesian: %.0f%%", name.c_str(), frac * 100);
+    if (frac < 0.9) { ROS_WARN("[%s] Niepelna sciezka!", name.c_str()); return false; }
+    moveit::planning_interface::MoveGroupInterface::Plan p;
+    p.trajectory_ = traj;
+    group.execute(p);
+    return true;
+}
+
+// Chwytak
+// Zamiast hand_group — zmień sygnaturę setGripper:
+void setGripper(ros::NodeHandle& nh, double pos)
+{
+    static ros::Publisher pub = nh.advertise<trajectory_msgs::JointTrajectory>(
+        "/move_group/fake_controller_joint_states", 1);
+
+    trajectory_msgs::JointTrajectory traj;
+    traj.header.stamp = ros::Time::now();
+    traj.joint_names  = {"jaw1", "jaw2"};
+
+    trajectory_msgs::JointTrajectoryPoint pt;
+    pt.positions       = {pos, pos};
+    pt.time_from_start = ros::Duration(0.5);
+    traj.points.push_back(pt);
+
+    ros::WallDuration(0.1).sleep();
+    pub.publish(traj);
+    ros::WallDuration(0.6).sleep();
+}
+
 // ─────────────────────────────────────────────────────────────
 //  PICK
 // ─────────────────────────────────────────────────────────────
 
-void pick(moveit::planning_interface::MoveGroupInterface& move_group)
+bool pickCustom(moveit::planning_interface::MoveGroupInterface& arm, ros::NodeHandle& nh,
+                ros::Publisher& disp, rosbag::Bag& bag)
 {
-    std::vector<moveit_msgs::Grasp> grasps;
-    grasps.resize(1);
-
-    grasps[0].id = "grasp0";
-
-    // ── Poza chwytu ───────────────────────────────────────────
-    grasps[0].grasp_pose.header.frame_id = "base_link";
-
-    const double ux      = OBJ_X;
-    const double uy      = OBJ_Y;
-    const double angle_z = std::atan2(uy, ux);   // kąt do obiektu w planie XY
-
-    tf2::Quaternion orientation;
-    orientation.setRPY(0.0, -tau/4.0, tau/4.+angle_z);  // Roll=0, Pitch=-90°, Yaw=angle_z
-    grasps[0].grasp_pose.pose.orientation = tf2::toMsg(orientation);
-
-    ROS_INFO("Pick orient: angle_z=%.4f rad (%.1f deg)", angle_z, angle_z * 180.0 / M_PI);
-
-
-    // Orientacja identyczna jak w HOME (qw=1) – potwierdzona jako osiągalna
-    // tf2::Quaternion orientation;
-    // orientation.setRPY(0, -tau/4, 0);
-    // grasps[0].grasp_pose.pose.orientation = tf2::toMsg(orientation);
-
+    const double ux = OBJ_X, uy = OBJ_Y;
     const double u_len = std::sqrt(ux*ux + uy*uy);
-    grasps[0].grasp_pose.pose.position.x = OBJ_X - (ux / u_len) * TOOL_OFFSET;
-    grasps[0].grasp_pose.pose.position.y = OBJ_Y - (uy / u_len) * TOOL_OFFSET;
-    grasps[0].grasp_pose.pose.position.z = OBJ_Z + OBJ_H / 2.0;
+    const double angle = std::atan2(uy, ux);
 
-    // ── Podejscie wzdluz wektora u (w kierunku obiektu) ───────
-    grasps[0].pre_grasp_approach.direction.header.frame_id = "base_link";
-    grasps[0].pre_grasp_approach.direction.vector.x = ux / u_len;  // znormalizowany
-    grasps[0].pre_grasp_approach.direction.vector.y = uy / u_len;
-    grasps[0].pre_grasp_approach.direction.vector.z = 0.0;
-    grasps[0].pre_grasp_approach.min_distance     = APPROACH_MIN;
-    grasps[0].pre_grasp_approach.desired_distance = APPROACH_DES;
+    tf2::Quaternion q;
+    q.setRPY(0.0, -tau/4.0, tau/4.0 + angle);   // chwyt z boku, twarzą do obiektu
 
-    // Pozycja – srodek cylindra
-    // grasps[0].grasp_pose.pose.position.x = OBJ_X;
-    // grasps[0].grasp_pose.pose.position.y = OBJ_Y+0.05;
-    // grasps[0].grasp_pose.pose.position.z = OBJ_Z + OBJ_H / 2.0;
+    // Poza chwytu (chwytak przesunięty o TOOL_OFFSET od środka)
+    geometry_msgs::Pose grasp;
+    grasp.position.x = OBJ_X - (ux/u_len) * TOOL_OFFSET;
+    grasp.position.y = OBJ_Y - (uy/u_len) * TOOL_OFFSET;
+    grasp.position.z = OBJ_Z + OBJ_H / 2.0;
+    grasp.orientation = tf2::toMsg(q);
 
-    // // ── Podejscie wzdluz +Y → obiekt jest przy y=-0.31 ────────
-    // // TCP HOME patrzy w kierunku -Y, więc podchodzimy wzdluz -Y
-    // grasps[0].pre_grasp_approach.direction.header.frame_id = "base_link";
-    // grasps[0].pre_grasp_approach.direction.vector.y = -1.0;  // zbliżamy sie w -Y
-    // grasps[0].pre_grasp_approach.direction.vector.z =  0.0;
-    // grasps[0].pre_grasp_approach.min_distance     = APPROACH_MIN;
-    // grasps[0].pre_grasp_approach.desired_distance = APPROACH_DES;
+    // Pre-grasp (cofnięty wzdłuż podejścia)
+    geometry_msgs::Pose pre = grasp;
+    pre.position.x -= (ux/u_len) * APPROACH_DES;
+    pre.position.y -= (uy/u_len) * APPROACH_DES;
 
-    // ── Odejscie w gore po chwycie ────────────────────────────
-    grasps[0].post_grasp_retreat.direction.header.frame_id = "base_link";
-    grasps[0].post_grasp_retreat.direction.vector.z = 1.0;
-    grasps[0].post_grasp_retreat.direction.vector.y = 0.0;
-    grasps[0].post_grasp_retreat.min_distance     = RETREAT_MIN;
-    grasps[0].post_grasp_retreat.desired_distance = RETREAT_DES;
+    // 1. Wolny dojazd do pre-grasp (przegląd + replan)
+    ArctosCfg::applyConstraints(arm, ArctosCfg::forApproachPick());
+    arm.setPoseTarget(pre);
+    if (ArctosReview::planReviewExecute(arm, "pick_pre", disp, &bag)
+            == ArctosReview::Result::ABORTED) return false;
+    ArctosCfg::clearConstraints(arm);
 
-    // ── frame_id w posturach (wymagane przez MoveIt) ──────────
-    grasps[0].pre_grasp_posture.header.frame_id = "base_link";
-    grasps[0].grasp_posture.header.frame_id     = "base_link";
+    // 2. Otwórz chwytak
+    setGripper(nh, 0.0);
 
-    openGripper(grasps[0].pre_grasp_posture);
-    closedGripper(grasps[0].grasp_posture);
-    // DODAJ po closedGripper:
-    //grasps[0].allowed_touch_objects.push_back("object");
-    //grasps[0].allowed_touch_objects.push_back("table1");
+    // 3. Cartesian podejście do obiektu
+    if (!cartesianMove(arm, grasp, "pick_approach")) return false;
 
-    move_group.setSupportSurfaceName("table1");
+    // 4. Zamknij chwytak + przypnij obiekt
+    setGripper(nh, 0.015);
+    arm.attachObject("object", arm.getEndEffectorLink());
+    ros::WallDuration(0.5).sleep();
 
-    moveit::planning_interface::MoveItErrorCode result =
-        move_group.pick("object", grasps);
+    // 5. Cartesian odwrot w gore
+    geometry_msgs::Pose retreat = grasp;
+    retreat.position.z += RETREAT_DES;
+    cartesianMove(arm, retreat, "pick_retreat");
 
-    if (result == moveit::planning_interface::MoveItErrorCode::SUCCESS)
-        ROS_INFO("Pick: SUKCES");
-    else
-        ROS_WARN("Pick: BLAD (kod %d)", result.val);
+    // geometry_msgs::Pose retreat = grasp;
+    // // retreat.position.x = grasp.position.x - (ux/u_len) * 1/2.*APPROACH_DES;
+    // // retreat.position.y = grasp.position.y - (uy/u_len) * 1/2.*APPROACH_DES;
+    // retreat.position.z = grasp.position.z + RETREAT_DES;
+    // // retreat.orientation = grasp.orientation;
+
+    // cartesianMove(arm, retreat, "pick_retreat");
+
+    ROS_INFO("Pick: SUKCES");
+    return true;
 }
 
 // ─────────────────────────────────────────────────────────────
 //  PLACE
 // ─────────────────────────────────────────────────────────────
 
-void place(moveit::planning_interface::MoveGroupInterface& group)
+bool placeCustom(moveit::planning_interface::MoveGroupInterface& arm, 
+                 ros::NodeHandle& nh,
+                 ros::Publisher& disp, rosbag::Bag& bag)
 {
-    std::vector<moveit_msgs::PlaceLocation> place_location;
-    place_location.resize(1);
+    const double angle = std::atan2(B2Y, B2X);
+    const double cx = std::cos(angle), cy = std::sin(angle);
 
-    place_location[0].id = "place0";
+    tf2::Quaternion q;
+    q.setRPY(0.0, -tau/4.0, tau/4.0 + angle);   // TEN SAM chwyt, obrócony ku celowi
 
-    place_location[0].place_pose.header.frame_id = "base_link";
+    // Poza odłożenia (chwytak przesunięty jak w pick)
+    geometry_msgs::Pose place;
+    place.position.x = B2X - cx * TOOL_OFFSET;
+    place.position.y = B2Y - cy * TOOL_OFFSET;
+    place.position.z = B2Z + TABLE_H2 + OBJ_H / 2.0;
+    place.orientation = tf2::toMsg(q);
 
-    //Przyrostowo zwiekszamy wzgl pick
-    const double angle_z_pick = std::atan2(OBJ_Y, OBJ_X);   // kąt do obiektu w planie XY
+    // Pre-place (nad celem)
+    geometry_msgs::Pose pre = place;
+    pre.position.z += APPROACH_DES;
 
-    const double ux      = B2X;
-    const double uy      = B2Y;
-    const double angle_z2 = std::atan2(uy, ux);
+    // 1. Wolny dojazd do pre-place (przegląd + replan) — głównie obrót joint1
+    ArctosCfg::applyConstraints(arm, ArctosCfg::forApproachPlace());
 
-    ROS_INFO("Place orient: angle_z=%.4f rad (%.1f deg)", angle_z2 - angle_z_pick, (angle_z2 - angle_z_pick) * 180.0 / M_PI);
+    arm.setStartStateToCurrentState();
 
-    tf2::Quaternion orientation;
-    orientation.setRPY(0, 0, angle_z2 - angle_z_pick);
-    place_location[0].place_pose.pose.orientation = tf2::toMsg(orientation);
+    arm.setPoseTarget(pre);
+    if (ArctosReview::planReviewExecute(arm, "place_pre", disp, &bag)
+            == ArctosReview::Result::ABORTED) return false;
+    ArctosCfg::clearConstraints(arm);
 
-    // Srodek cylindra na stole2
-    place_location[0].place_pose.pose.position.x = B2X;
-    place_location[0].place_pose.pose.position.y = B2Y;
-    place_location[0].place_pose.pose.position.z = B2Z + TABLE_H2 + OBJ_H / 2.0;
+    // 2. Cartesian zjazd
+    if (!cartesianMove(arm, place, "place_descent")) return false;
 
-    // ── Podejscie z gory do stolu2 ────────────────────────────
-    place_location[0].pre_place_approach.direction.header.frame_id = "base_link";
-    place_location[0].pre_place_approach.direction.vector.z = -1.0;
-    place_location[0].pre_place_approach.direction.vector.y =  0.0;
-    place_location[0].pre_place_approach.min_distance     = APPROACH_MIN;
-    place_location[0].pre_place_approach.desired_distance = APPROACH_DES;
+    // 3. Otwórz chwytak + odepnij obiekt
+    setGripper(nh, 0.0);
+    arm.detachObject("object");
+    ros::WallDuration(0.5).sleep();
 
-    // ── Odejscie w gore po odlozeniu ──────────────────────────
-    place_location[0].post_place_retreat.direction.header.frame_id = "base_link";
-    place_location[0].post_place_retreat.direction.vector.z = 1.0;
-    place_location[0].post_place_retreat.min_distance     = RETREAT_MIN;
-    place_location[0].post_place_retreat.desired_distance = RETREAT_DES;
+    // 4. Cartesian odwrot w gore
+    geometry_msgs::Pose retreat = place;
+    retreat.position.z += RETREAT_DES;
+    cartesianMove(arm, retreat, "place_retreat");
 
-    // ── frame_id w posturze chwytaka ──────────────────────────
-    place_location[0].post_place_posture.header.frame_id = "base_link";
-
-    openGripper(place_location[0].post_place_posture);
-
-    group.setSupportSurfaceName("table2");
-
-    // place_location[0].allowed_touch_objects.push_back("table2");
-
-    moveit::planning_interface::MoveItErrorCode result =
-        group.place("object", place_location);
-
-    if (result == moveit::planning_interface::MoveItErrorCode::SUCCESS)
-        ROS_INFO("Place: SUKCES");
-    else
-        ROS_WARN("Place: BLAD (kod %d)", result.val);
+    ROS_INFO("Place: SUKCES");
+    return true;
 }
-
 // ─────────────────────────────────────────────────────────────
 //  SCENA KOLIZJI
 // ─────────────────────────────────────────────────────────────
@@ -288,6 +290,7 @@ int main(int argc, char** argv)
 
     moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
     moveit::planning_interface::MoveGroupInterface arm_group("arm");
+    //moveit::planning_interface::MoveGroupInterface hand_group("hand");
 
     arm_group.setPlanningTime(10.0);
     arm_group.setNumPlanningAttempts(5);
@@ -298,15 +301,13 @@ int main(int argc, char** argv)
 
     // KLUCZOWE: setEndEffector raz w main, przed pick i place
     // Nazwa "hand" pochodzi z SRDF: <end_effector name="hand" ...>
-    arm_group.setEndEffector("hand");
+    // arm_group.setEndEffector("hand");
 
     ros::Publisher disp_pub = nh.advertise<moveit_msgs::DisplayTrajectory>(
         "/move_group/display_planned_path", 1, true);
 
     rosbag::Bag bag;
     bag.open("/root/catkin_ws/accepted_motions.bag", rosbag::bagmode::Write);
-
-    using ArctosReview::Result;
 
     ROS_INFO("Reference frame : %s", arm_group.getPlanningFrame().c_str());
     ROS_INFO("End effector    : %s", arm_group.getEndEffectorLink().c_str());
@@ -331,64 +332,17 @@ int main(int argc, char** argv)
     addCollisionObjects(planning_scene_interface);
     ros::WallDuration(1.0).sleep();
 
-
-    {
-    const double ux = OBJ_X, uy = OBJ_Y;
-    const double u_len = std::sqrt(ux*ux + uy*uy);
-    const double dist = TOOL_OFFSET + APPROACH_DES;
-
-    geometry_msgs::Pose pre_pick;
-    pre_pick.position.x = OBJ_X - (ux/u_len) * dist;
-    pre_pick.position.y = OBJ_Y - (uy/u_len) * dist;
-    pre_pick.position.z = OBJ_Z + OBJ_H / 2.0;
-
-    tf2::Quaternion q;
-    q.setRPY(0.0, -tau/4.0, tau/4.0 + std::atan2(uy, ux));
-    pre_pick.orientation = tf2::toMsg(q);
-
-    ArctosCfg::applyConstraints(arm_group, ArctosCfg::forApproachPick());
-    arm_group.setPoseTarget(pre_pick);
-    if (ArctosReview::planReviewExecute(arm_group, "do_pre_pick", disp_pub, &bag)
-            == ArctosReview::Result::ABORTED) { bag.close(); return 0; }
-    ArctosCfg::clearConstraints(arm_group);
-    }
-
-
-    ROS_INFO(">>> PICK...");
-    // ArctosCfg::applyConstraints(arm_group, ArctosCfg::forApproachPick());
-    pick(arm_group);
-    // ArctosCfg::clearConstraints(arm_group);
+    
+    if (!pickCustom(arm_group, nh, disp_pub, bag))  { bag.close(); return 0; }
     ros::WallDuration(1.0).sleep();
 
-    // ── RUCH DO POZYCJI PRE-PLACE (przegląd + replan) ─────────────
-// ── RUCH DO POZYCJI PRE-PLACE (przegląd + replan) ─────────────
-    {
-    // Orientacja, w jakiej obiekt jest TRZYMANY po pick.
-    // place() oczekuje jej jako punktu startowego i sam dokłada
-    // przyrostowy obrót (angle_z2 - angle_z_pick).
-    geometry_msgs::Pose held = arm_group.getCurrentPose().pose;
-
-    geometry_msgs::Pose pre_place;
-    pre_place.position.x = B2X;
-    pre_place.position.y = B2Y;
-    pre_place.position.z = B2Z + TABLE_H2 + OBJ_H / 2.0 + APPROACH_DES;
-    pre_place.orientation = held.orientation;   // <<< NIE reorientuj, tylko translacja
-
-    ArctosCfg::applyConstraints(arm_group, ArctosCfg::forApproachPlace());
-    arm_group.setPoseTarget(pre_place);
-    if (ArctosReview::planReviewExecute(arm_group, "do_pre_place", disp_pub, &bag)
-            == ArctosReview::Result::ABORTED) { bag.close(); return 0; }
-    ArctosCfg::clearConstraints(arm_group);
-    }  
-    
-
-
-    ROS_INFO(">>> PLACE...");
-    
-    place(arm_group);
-    
+    if (!placeCustom(arm_group, nh, disp_pub, bag)) { bag.close(); return 0; }
     ros::WallDuration(1.0).sleep();
 
+    arm_group.setNamedTarget("home");
+    arm_group.move();
+
+    bag.close();
     ROS_INFO(">>> Sekwencja zakonczona.");
     ros::waitForShutdown();
     return 0;
